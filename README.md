@@ -1,4 +1,4 @@
-# RaidLootTracker | by Koosche | 
+# RaidLootTracker | by Koosche
 # Please let me know if you're encountering bugs. 
 
 WotLK 3.3.5a addon for master looters running MS > OS > Tmog. Tracks rolls, handles +1 penalties, auto-fills trade windows, and logs every decision. Built for Bronzebeard Ascension.
