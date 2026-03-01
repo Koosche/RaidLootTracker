@@ -18,7 +18,6 @@ local DB_DEFAULTS = {
     lootLog     = {},
     autoLoot    = true,
     autoTrade   = true,
-    mlMode      = true,
     rollTimer   = 20,
     channel     = "RAID",
     version     = VERSION,
@@ -32,7 +31,6 @@ local RLT = {
     timerActive    = false,
     timerRemaining = 0,
     pendingTrades  = {},
-    sessionClosed  = false,  -- true after timer runs out; blocks ML Mode re-trigger until resolved/cancelled
     lastItemLink   = nil,   -- prevents same link restarting a session immediately
     lastItemTime   = 0,     -- GetTime() when last session was started
 }
@@ -385,38 +383,9 @@ local function BuildUI()
     local timerText=rp:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
     timerText:SetPoint("CENTER",timerBg,"CENTER",0,0); timerText:SetText(""); timerText:SetTextColor(1,1,1,1); UI.timerText=timerText
 
-    -- ML Mode quick-toggle (top-right of Rolls tab header)
-    local mlQuickBtn=MakeButton(rp,"ML: ON",68,22,C.ui.green[1],C.ui.green[2],C.ui.green[3])
-    mlQuickBtn:SetPoint("TOPRIGHT",rp,"TOPRIGHT",-8,-8)
-    UI.mlQuickBtn=mlQuickBtn
-    function UI.RefreshMLQuick()
-        if not RLT.db then return end
-        if RLT.db.mlMode then
-            mlQuickBtn.fill:SetColorTexture(C.ui.green[1]*0.35,C.ui.green[2]*0.35,C.ui.green[3]*0.35,1)
-            mlQuickBtn.border:SetColorTexture(C.ui.green[1],C.ui.green[2],C.ui.green[3],1)
-            mlQuickBtn.label:SetTextColor(1,1,1,1); mlQuickBtn.label:SetText("ML: ON")
-        else
-            mlQuickBtn.fill:SetColorTexture(C.ui.red[1]*0.18,C.ui.red[2]*0.18,C.ui.red[3]*0.18,1)
-            mlQuickBtn.border:SetColorTexture(C.ui.red[1],C.ui.red[2],C.ui.red[3],0.70)
-            mlQuickBtn.label:SetTextColor(C.ui.red[1],C.ui.red[2],C.ui.red[3]); mlQuickBtn.label:SetText("ML: OFF")
-        end
-    end
-    mlQuickBtn:SetScript("OnClick",function()
-        RLT.db.mlMode=not RLT.db.mlMode
-        UI.RefreshMLQuick(); UI.RefreshMLMode(); UI.RefreshRolls()
-    end)
-    mlQuickBtn:SetScript("OnEnter",function(self)
-        GameTooltip:SetOwner(self,"ANCHOR_BOTTOMRIGHT")
-        GameTooltip:SetText("ML Mode",1,1,1)
-        GameTooltip:AddLine(RLT.db.mlMode and "ON - auto-starts when you link an item" or "OFF - use /rlt roll manually",0.7,0.7,0.7)
-        GameTooltip:AddLine("Click to toggle",0.5,0.5,0.5)
-        GameTooltip:Show()
-    end)
-    mlQuickBtn:SetScript("OnLeave",function() GameTooltip:Hide() end)
-
-    -- Roll count badge (now below ML toggle)
+    -- Roll count badge
     local badgeBg=BgTex(rp,C.ui.bgLight[1],C.ui.bgLight[2],C.ui.bgLight[3],1,"ARTWORK")
-    badgeBg:SetSize(52,36); badgeBg:SetPoint("TOPRIGHT",rp,"TOPRIGHT",-8,-34)
+    badgeBg:SetSize(52,62); badgeBg:SetPoint("TOPRIGHT",rp,"TOPRIGHT",-8,-8)
     local badgeNum=rp:CreateFontString(nil,"OVERLAY","GameFontNormalLarge")
     badgeNum:SetAllPoints(badgeBg); badgeNum:SetJustifyH("CENTER"); badgeNum:SetJustifyV("MIDDLE")
     badgeNum:SetText("0"); badgeNum:SetTextColor(1,1,1,1); UI.rollCount=badgeNum
@@ -469,13 +438,13 @@ local function BuildUI()
 
     resolveBtn:SetScript("OnClick",function()
         if not RLT.session then PrintErr("No active session."); return end
-        local s=RLT.session; RLT.session=nil; RLT.sessionClosed=false; ResolveSession(s); UI.Refresh()
+        local s=RLT.session; RLT.session=nil; ResolveSession(s); UI.Refresh()
     end)
     cancelBtn:SetScript("OnClick",function()
         if RLT.waitingForItem then RLT.waitingForItem=false; Print("Cancelled."); UI.Refresh(); return end
         if not RLT.session then PrintErr("No active session."); return end
         RLT.timerActive=false; RLT.timerRemaining=0
-        Print("Cancelled: "..RLT.session.itemLink); RLT.sessionClosed=false; RLT.session=nil; UI.Refresh()
+        Print("Cancelled: "..RLT.session.itemLink); RLT.session=nil; UI.Refresh()
     end)
     refreshBtn:SetScript("OnClick",function() UI.Refresh() end)
     testBtn:SetScript("OnClick",function()
@@ -509,13 +478,7 @@ local function BuildUI()
 
         if not hasSession then
             if not isWaiting then
-                if RLT.sessionClosed then
-                rItemName:SetText("|cffff9933Roll closed -- click Resolve to finalize|r")
-            elseif RLT.db and RLT.db.mlMode then
-                rItemName:SetText("|cff666666ML Mode ON -- link an item in chat to begin|r")
-            else
                 rItemName:SetText("|cff666666No active session -- /rlt roll to begin|r")
-            end
             end
             rMeta:SetText(""); badgeNum:SetText("0")
             timerFill:SetWidth(0); timerText:SetText("")
@@ -711,21 +674,6 @@ local function BuildUI()
     -- ── Settings header ───────────────────────────────────────
     SectionHdr("Settings")
 
-    -- ── ML Mode ───────────────────────────────────────────────
-    local ry1 = Row("ML Mode","Auto-start rolls when you link an item in chat.")
-    local mlOffBtn = MakeButton(setp,"OFF",BTN_W,BTN_H,C.ui.red[1],C.ui.red[2],C.ui.red[3])
-    local mlOnBtn  = MakeButton(setp,"ON", BTN_W,BTN_H,C.ui.green[1],C.ui.green[2],C.ui.green[3])
-    mlOffBtn:SetPoint("TOPRIGHT",setp,"TOPRIGHT",-8,ry1-11)
-    mlOnBtn:SetPoint("RIGHT",mlOffBtn,"LEFT",-4,0)
-    UI.mlOnBtn=mlOnBtn; UI.mlOffBtn=mlOffBtn
-    function UI.RefreshMLMode()
-        if not RLT.db then return end
-        ActiveToggle(mlOnBtn, C.ui.green[1],C.ui.green[2],C.ui.green[3],RLT.db.mlMode)
-        ActiveToggle(mlOffBtn,C.ui.red[1],  C.ui.red[2],  C.ui.red[3],  not RLT.db.mlMode)
-    end
-    mlOnBtn:SetScript("OnClick", function() RLT.db.mlMode=true;  UI.RefreshMLMode(); UI.RefreshRolls(); if UI.RefreshMLQuick then UI.RefreshMLQuick() end end)
-    mlOffBtn:SetScript("OnClick",function() RLT.db.mlMode=false; UI.RefreshMLMode(); UI.RefreshRolls(); if UI.RefreshMLQuick then UI.RefreshMLQuick() end end)
-
     -- ── Roll Timer ────────────────────────────────────────────
     local ry2 = Row("Roll Timer","Seconds before rolls close. Steps of 10.")
     local timerDisp = setp:CreateFontString(nil,"OVERLAY","GameFontNormal")
@@ -827,8 +775,7 @@ local function BuildUI()
     verFS2:SetText("|cff444444RaidLootTracker v"..VERSION.." by Koosche|r")
     function UI.Refresh()
         UI.RefreshRolls(); UI.RefreshStandings(); UI.RefreshLog()
-        UI.RefreshAutoLoot(); UI.RefreshAutoTrade(); UI.RefreshChannel(); UI.RefreshMLMode(); UI.RefreshTimerDisp()
-        if UI.RefreshMLQuick then UI.RefreshMLQuick() end
+        UI.RefreshAutoLoot(); UI.RefreshAutoTrade(); UI.RefreshChannel(); UI.RefreshTimerDisp()
     end
 
     -- Minimap button — mirrors the exact layer technique used by WIM (confirmed working on 3.3.5a)
@@ -955,7 +902,6 @@ masterFrame:SetScript("OnUpdate",function(self,elapsed)
 
         if RLT.timerRemaining <= 0 then
             RLT.timerActive = false; RLT.timerRemaining = 0
-            RLT.sessionClosed = true
             AnnounceWarn("Rolls CLOSED: " .. RLT.session.itemName)
             Announce("[RLT] Rolls closed for " .. RLT.session.itemLink .. " -- click Resolve to finalize.")
             if UI.main then UI.Refresh() end
@@ -1014,12 +960,6 @@ local function CaptureTrade()
     end
 end
 
-local function SenderIsMe(sender)
-    if not sender then return false end
-    local myName=UnitName("player"); if not myName then return false end
-    local myFull=myName.."-"..(REALM_NAME or GetRealmName())
-    return sender==myName or sender==myFull
-end
 
 masterFrame:SetScript("OnEvent",function(self,event,...)
     if event=="ADDON_LOADED" then
@@ -1037,7 +977,7 @@ masterFrame:SetScript("OnEvent",function(self,event,...)
             UI.main:ClearAllPoints()
             UI.main:SetPoint("BOTTOMLEFT",UIParent,"BOTTOMLEFT",RLT.db.windowPos.x/s,RLT.db.windowPos.y/s)
         else UI.main:SetPoint("CENTER",UIParent,"CENTER",0,0) end
-        Print("v"..VERSION.." loaded  --  /rlt to open  --  ML Mode: "..(RLT.db.mlMode and "ON" or "OFF"))
+        Print("v"..VERSION.." loaded  --  /rlt to open")
 
     elseif event=="PLAYER_ENTERING_WORLD" then
         REALM_NAME=GetRealmName()
@@ -1067,12 +1007,7 @@ masterFrame:SetScript("OnEvent",function(self,event,...)
         or event=="CHAT_MSG_RAID" or event=="CHAT_MSG_RAID_LEADER"
         or event=="CHAT_MSG_WHISPER" then
         local msg,sender=...
-        -- ML Mode: we linked an item -> auto-start
-        if RLT.db and RLT.db.mlMode and SenderIsMe(sender) and not RLT.session and not RLT.sessionClosed then
-            local itemLink=msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r)")
-            if itemLink then StartSession(itemLink,1); return end
-        end
-        -- Manual waiting mode
+        -- Waiting for item link (from /rlt roll with no args)
         if RLT.waitingForItem then
             local itemLink=msg:match("(|c%x+|Hitem:.-|h%[.-%]|h|r)")
             if itemLink then RLT.waitingForItem=false; StartSession(itemLink,1) end
@@ -1089,6 +1024,8 @@ masterFrame:SetScript("OnEvent",function(self,event,...)
         autoLootWait=true; autoLootElapsed=0
 
     elseif event=="TRADE_SHOW" then
+        -- Fresh trade window: clear any stale snapshot from a previous trade
+        tradePend={target="",items={}}
         OnTradeShow()
         if TradeFrameTradeButton and not TradeFrameTradeButton._rltHooked then
             TradeFrameTradeButton:HookScript("OnClick",CaptureTrade)
@@ -1096,11 +1033,13 @@ masterFrame:SetScript("OnEvent",function(self,event,...)
         end
 
     elseif event=="TRADE_CLOSED" then
-        -- Reset on close regardless; announce only happens via UI_INFO_MESSAGE below
-        tradePend={target="",items={}}
+        -- Do NOT clear tradePend here -- UI_INFO_MESSAGE "Trade complete." fires
+        -- immediately after TRADE_CLOSED on a successful trade and needs the snapshot.
+        -- tradePend is cleared in UI_INFO_MESSAGE after announce, and on next TRADE_SHOW.
+        -- If cancelled, UI_INFO_MESSAGE never fires so tradePend just sits until next trade.
 
     elseif event=="UI_INFO_MESSAGE" then
-        -- Only fires "Trade complete." when BOTH sides confirmed -- never on cancel
+        -- "Trade complete." only fires when both players confirmed -- never on cancel
         local msg=...
         if msg and msg:find("Trade complete") and RLT.db and RLT.db.autoTrade then
             if #tradePend.items>0 and tradePend.target~="" then
@@ -1109,6 +1048,10 @@ masterFrame:SetScript("OnEvent",function(self,event,...)
                 end
                 if UI.main and UI.main:IsShown() then UI.RefreshLog() end
             end
+        end
+        -- Clear after announce regardless (successful or unrelated message)
+        if msg and msg:find("Trade complete") then
+            tradePend={target="",items={}}
         end
     end
 end)
@@ -1133,23 +1076,16 @@ SlashCmdList["RLT"]=function(input)
             {"/rlt showrolls","Print sorted order"}, {"/rlt plusones","Print +1 standings"},
             {"/rlt setplusone <n> <num>","Set +1 count"}, {"/rlt resetplusone <n>","Reset player"},
             {"/rlt resetall","Wipe all +1s"}, {"/rlt log [n]","Print last N decisions"},
-            {"/rlt autoloot on|off","Toggle auto-loot"}, {"/rlt mlmode on|off","Toggle ML Mode"},
-            {"/rlt channel raid|party|say","Announce channel"}, {"/rlt status","Show config"}}
+            {"/rlt autoloot on|off","Toggle auto-loot"}, {"/rlt channel raid|party|say","Announce channel"}, {"/rlt status","Show config"}}
         for _,r in ipairs(cmds) do Print(Colorize(C.gold,r[1]).." -- "..r[2]) end
 
     elseif cmd=="status" then
-        Print("ML Mode: "..(RLT.db.mlMode and Colorize(C.green,"ON") or Colorize(C.red,"OFF")))
         Print("AutoLoot: "..(RLT.db.autoLoot and Colorize(C.green,"ON") or Colorize(C.red,"OFF")))
         Print("Channel: "..Colorize(C.gold,RLT.db.channel).."  Timer: "..RLT.db.rollTimer.."s")
         if RLT.session then
             local n=0; for _ in pairs(RLT.session.rolls) do n=n+1 end
             Print("Active: "..RLT.session.itemLink.." ("..n.." rolls, "..math.ceil(RLT.timerRemaining).."s left)")
         end
-
-    elseif cmd=="mlmode" then
-        if rest:lower()=="on" then RLT.db.mlMode=true; Print("ML Mode "..Colorize(C.green,"ON"))
-        elseif rest:lower()=="off" then RLT.db.mlMode=false; Print("ML Mode "..Colorize(C.red,"OFF"))
-        else PrintErr("Usage: /rlt mlmode on|off") end; RA()
 
     elseif cmd=="autoloot" then
         if rest:lower()=="on" then RLT.db.autoLoot=true; Print("Auto-loot "..Colorize(C.green,"ENABLED"))
@@ -1179,13 +1115,13 @@ SlashCmdList["RLT"]=function(input)
 
     elseif cmd=="resolve" then
         if not RLT.session then PrintErr("No active session."); return end
-        local s=RLT.session; RLT.session=nil; RLT.sessionClosed=false; ResolveSession(s); RA()
+        local s=RLT.session; RLT.session=nil; ResolveSession(s); RA()
 
     elseif cmd=="cancel" then
         if RLT.waitingForItem then RLT.waitingForItem=false; Print("Cancelled."); RA(); return end
         if not RLT.session then PrintErr("No active session."); return end
         RLT.timerActive=false; RLT.timerRemaining=0
-        Print("Cancelled: "..RLT.session.itemLink); RLT.sessionClosed=false; RLT.session=nil; RA()
+        Print("Cancelled: "..RLT.session.itemLink); RLT.session=nil; RA()
 
     elseif cmd=="addroll" then
         if not RLT.session then PrintErr("No active session."); return end
