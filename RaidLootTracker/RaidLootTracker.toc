@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: RaidLootTracker
+## Notes: MS > OS > Tmog +1 system Bronzebeard Ascension
+## Author: Koosche
+## Version: 2.2.0
+## SavedVariables: RaidLootTrackerDB
+
+RaidLootTracker.lua
